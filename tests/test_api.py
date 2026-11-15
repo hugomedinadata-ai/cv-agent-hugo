@@ -4,7 +4,7 @@ import os
 
 os.environ["LLM_PROVIDER"] = "mock"
 from fastapi.testclient import TestClient  # noqa: E402
-from app.main import app  # noqa: E402
+from app.main import app, agent  # noqa: E402
 
 client = TestClient(app)
 
@@ -70,3 +70,10 @@ def test_sin_falso_positivo():
     # "¿Cómo actúa como líder?" es una pregunta legítima, no una inyección
     r = client.post("/v1/responses", json={"input": "¿Cómo actúa como líder de equipo?"})
     assert "Solo puedo conversar" not in r.json()["output"][0]["content"][0]["text"]
+
+
+
+def test_full_text_incluye_titulos_de_seccion():
+    text = agent.retriever.full_text
+    assert "Grupo Salinas / Banco Azteca (2017 a 2021)" in text
+    assert "BBVA Bancomer (2009 a 2017)" in text
