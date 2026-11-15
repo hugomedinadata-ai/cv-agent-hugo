@@ -12,7 +12,7 @@ class LLM:
             self.client = OpenAI(
     base_url=config.LLM_BASE_URL,
     api_key=config.LLM_API_KEY,
-    timeout=25,
+    timeout=50,
     max_retries=0,
 )
 
