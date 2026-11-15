@@ -9,7 +9,12 @@ class LLM:
         self.mock = config.LLM_PROVIDER == "mock"
         if not self.mock:
             from openai import OpenAI
-            self.client = OpenAI(base_url=config.LLM_BASE_URL, api_key=config.LLM_API_KEY, timeout=40)
+            self.client = OpenAI(
+    base_url=config.LLM_BASE_URL,
+    api_key=config.LLM_API_KEY,
+    timeout=25,
+    max_retries=0,
+)
 
     def complete(self, messages: list[dict]) -> tuple[str, dict]:
         if self.mock:
