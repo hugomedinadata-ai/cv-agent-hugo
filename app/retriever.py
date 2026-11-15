@@ -89,4 +89,4 @@ class Retriever:
 
     @property
     def full_text(self) -> str:
-        return "\n".join(c.text for c in self.chunks)
+        return "\n".join(f"## {c.title}\n{c.text}" for c in self.chunks)
