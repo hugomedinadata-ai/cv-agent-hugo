@@ -1,4 +1,5 @@
 """Orquestación del agente: guardrails -> recuperación -> prompt -> modelo -> verificación."""
+import json
 import logging
 import time
 from . import config
@@ -53,7 +54,10 @@ class CVAgent:
         if msgs is None:
             return INJECTION_REPLY, {}, meta
         text, usage = self.llm.complete(msgs)
+        # model/attempts son diagnóstico: van a metadata, no al objeto usage del protocolo
+        meta["llm_model"] = usage.pop("model", None)
+        meta["llm_attempts"] = usage.pop("attempts", None)
         meta["ungrounded_numbers"] = ungrounded_numbers(text, self.retriever.full_text)
         meta["latency_ms"] = int((time.time() - t0) * 1000)
-        log.info({"event": "answer", **meta, **usage})
+        log.info(json.dumps({"event": "answer", **meta, **usage}, ensure_ascii=False))
         return text.strip(), usage, meta

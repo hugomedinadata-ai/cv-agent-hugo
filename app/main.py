@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from . import config
 from .agent import CVAgent, INJECTION_REPLY
 from .guardrails import ungrounded_numbers
+from .llm import LLMError
 from .openresponses import message_item, new_id, parse_input, response_obj, stream_events
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -49,7 +50,20 @@ def remember(resp_id: str, history: list, answer: str):
 @app.get("/")
 @app.get("/health")
 def health():
-    return {"status": "ok", "agent": MODEL_NAME, "chunks": len(agent.retriever.chunks)}
+    # Ligero: no llama al modelo. Para probar el modelo usar /health/llm.
+    return {"status": "ok", "agent": MODEL_NAME, "chunks": len(agent.retriever.chunks),
+            "llm_provider": config.LLM_PROVIDER, "llm_model": config.LLM_MODEL,
+            "llm_fallback_model": config.LLM_FALLBACK_MODEL or None,
+            "llm_key_configured": bool(config.LLM_API_KEY)}
+
+
+@app.get("/health/llm")
+def health_llm(authorization: str | None = Header(default=None)):
+    """Diagnóstico real del modelo (consume cuota). Protegido con la misma API key."""
+    if config.AGENT_API_KEY and authorization != f"Bearer {config.AGENT_API_KEY}":
+        return error(401, "invalid_request", "API key inválida o ausente.", "invalid_api_key")
+    result = agent.llm.ping()
+    return JSONResponse(status_code=200 if result.get("ok") else 503, content=result)
 
 
 @app.post("/v1/responses")
@@ -102,14 +116,22 @@ async def create_response(request: Request, authorization: str | None = Header(d
 
     try:
         text, usage, meta = agent.answer(history, instructions)
-    except Exception as e:
-        log.exception("model_error")
-        return error(500, "model_error", "El servicio de IA no pudo generar una respuesta. Intenta nuevamente.", "model_error")
+    except LLMError as e:
+        log.error(json.dumps({"event": "llm_error", "id": resp_id, **e.diagnostics()}))
+        resp = error(e.http_status, "server_error", e.message, e.code)
+        if e.http_status == 503:
+            resp.headers["Retry-After"] = "5"
+        return resp
+    except Exception:
+        log.exception("unexpected_error")
+        return error(500, "server_error", "Error interno del agente.", "internal_error")
     remember(resp_id, history, text)
     out = response_obj(resp_id, model, int(t0), "completed", [message_item(text, new_id("msg"))],
                        usage=usage, prev=prev,
                        metadata={"sources": ", ".join(meta.get("sources", []))[:500],
                                  "ungrounded_numbers": ",".join(meta.get("ungrounded_numbers", [])),
-                                 "latency_ms": str(meta.get("latency_ms", ""))})
+                                 "latency_ms": str(meta.get("latency_ms", "")),
+                                 "llm_model": str(meta.get("llm_model") or ""),
+                                 "llm_attempts": str(meta.get("llm_attempts") or "")})
     out["output_text"] = text  # atajo útil para clientes; no rompe la especificación
     return out
