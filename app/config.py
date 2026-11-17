@@ -19,3 +19,6 @@ LLM_TOTAL_BUDGET_S = float(os.getenv("LLM_TOTAL_BUDGET_S", "42"))
 LLM_MAX_ATTEMPTS = int(os.getenv("LLM_MAX_ATTEMPTS", "3"))
 LLM_RETRY_BASE_DELAY_S = float(os.getenv("LLM_RETRY_BASE_DELAY_S", "0.5"))
 KNOWLEDGE_DIR = os.getenv("KNOWLEDGE_DIR", os.path.join(os.path.dirname(__file__), "..", "knowledge"))
+
+REDIS_URL = os.getenv("REDIS_URL", "")
+RATE_WINDOW_SECONDS = int(os.getenv("RATE_WINDOW_SECONDS", "60"))
