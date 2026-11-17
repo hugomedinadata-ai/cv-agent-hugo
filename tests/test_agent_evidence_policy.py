@@ -60,8 +60,8 @@ def test_agent_does_not_claim_personal_cicd_tool_implementation():
 
 
 def test_agent_does_not_invent_linear_mlops_cloudera_sequence():
-    assert "No afirmes que los modelos o scores se almacenaban primero en Cloudera" in SYSTEM_PROMPT
-    assert "ni que todos los flujos seguían una secuencia lineal única" in SYSTEM_PROMPT
+    assert "no afirmes que los scores generados por MLOps necesariamente ingresaban primero a Cloudera" in SYSTEM_PROMPT
+    assert "no inventes cómo se conectaban físicamente todos esos flujos" in SYSTEM_PROMPT
 
 
 def test_agent_separates_aws_kafka_initiatives_from_mlops_pipeline():
