@@ -94,9 +94,13 @@ async def create_response(request: Request, authorization: str | None = Header(d
         except ValueError:
             return error(400, "invalid_request", "Content-Length inválido.")
 
-    raw_body = await request.body()
-    if len(raw_body) > config.MAX_REQUEST_BYTES:
-        return error(413, "invalid_request", "El cuerpo de la solicitud excede el tamaño permitido.", "request_too_large")
+    # Leer en streaming y detenerse al superar el límite; evita acumular cuerpos
+    # arbitrariamente grandes cuando Content-Length no está presente o es falso.
+    raw_body = bytearray()
+    async for chunk in request.stream():
+        if len(raw_body) + len(chunk) > config.MAX_REQUEST_BYTES:
+            return error(413, "invalid_request", "El cuerpo de la solicitud excede el tamaño permitido.", "request_too_large")
+        raw_body.extend(chunk)
     try:
         body = json.loads(raw_body)
     except (json.JSONDecodeError, UnicodeDecodeError):
