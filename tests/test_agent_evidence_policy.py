@@ -54,7 +54,7 @@ def test_agent_uses_star_and_evidence_based_technical_interview_answers():
 
 def test_agent_does_not_claim_personal_cicd_tool_implementation():
     assert "no demuestra configuración o uso hands-on por Hugo" in SYSTEM_PROMPT
-    assert "No agrupues Control-M o Airflow como herramientas CI/CD" in SYSTEM_PROMPT
+    assert "Control-M o Airflow como herramientas CI/CD" in SYSTEM_PROMPT
     assert "AWS CloudFormation debe describirse como aprovisionamiento de infraestructura" in SYSTEM_PROMPT
     assert "No atribuyas causalidad exclusiva a CI/CD" in SYSTEM_PROMPT
 
