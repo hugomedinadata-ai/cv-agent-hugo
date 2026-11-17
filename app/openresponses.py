@@ -40,7 +40,9 @@ def parse_input(raw) -> list[dict]:
 
 
 def _valid_alternation(history: list[dict]) -> bool:
-    if not history or history[0].get("role") != "user":
+    if not isinstance(history, list) or not history or not isinstance(history[0], dict):
+        return False
+    if history[0].get("role") != "user":
         return False
     return all(isinstance(message, dict)
                and message.get("role") == ("user" if index % 2 == 0 else "assistant")
