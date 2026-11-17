@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app, agent  # noqa: E402
 import app.main as main_module  # noqa: E402
 
+# config may already be imported by other test modules before this module sets the env var.
+main_module.config.AGENT_API_KEY = "test-agent-key"
 client = TestClient(app, headers={"Authorization": "Bearer test-agent-key"})
 
 
