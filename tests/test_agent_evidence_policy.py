@@ -49,3 +49,20 @@ def test_agent_separates_personal_genai_project_from_enterprise_production():
 def test_agent_uses_star_and_evidence_based_technical_interview_answers():
     assert "resultado (STAR)" in SYSTEM_PROMPT
     assert "trade-offs únicamente cuando estén documentados" in SYSTEM_PROMPT
+
+
+
+def test_agent_does_not_claim_personal_cicd_tool_implementation():
+    assert "no demuestra configuración o uso hands-on por Hugo" in SYSTEM_PROMPT
+    assert "No agrupues Control-M o Airflow como herramientas CI/CD" in SYSTEM_PROMPT
+    assert "AWS CloudFormation debe describirse como aprovisionamiento de infraestructura" in SYSTEM_PROMPT
+    assert "No atribuyas causalidad exclusiva a CI/CD" in SYSTEM_PROMPT
+
+
+def test_agent_does_not_invent_linear_mlops_cloudera_sequence():
+    assert "No afirmes que los modelos o scores se almacenaban primero en Cloudera" in SYSTEM_PROMPT
+    assert "ni que todos los flujos seguían una secuencia lineal única" in SYSTEM_PROMPT
+
+
+def test_agent_separates_aws_kafka_initiatives_from_mlops_pipeline():
+    assert "no las presentes automáticamente como etapas del mismo pipeline MLOps" in SYSTEM_PROMPT
