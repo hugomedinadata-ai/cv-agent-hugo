@@ -71,4 +71,4 @@ def test_agent_separates_aws_kafka_initiatives_from_mlops_pipeline():
 def test_agent_explicitly_qualifies_bbva_aws_timeline_and_catalog_causality():
     assert "la cronología exacta no está confirmada" in SYSTEM_PROMPT
     assert "no está confirmada la relación causal exacta" in SYSTEM_PROMPT
-    assert "no afirmes que los catálogos causaron por sí solos" in SYSTEM_PROMPT
+    assert "No afirmes que los catálogos causaron por sí solos" in SYSTEM_PROMPT
