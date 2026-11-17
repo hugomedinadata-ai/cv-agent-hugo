@@ -3,10 +3,12 @@ import json
 import os
 
 os.environ["LLM_PROVIDER"] = "mock"
+os.environ["AGENT_API_KEY"] = "test-agent-key"
 from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app, agent  # noqa: E402
+import app.main as main_module  # noqa: E402
 
-client = TestClient(app)
+client = TestClient(app, headers={"Authorization": "Bearer test-agent-key"})
 
 
 def test_health():
@@ -58,22 +60,37 @@ def test_sin_input():
 
 
 def test_rate_limit(monkeypatch):
-    import app.main as m
-    monkeypatch.setattr(m, "RATE_LIMIT", 2)
-    m.RATE.clear()
+    monkeypatch.setattr(main_module, "RATE_LIMIT", 2)
+    main_module.RATE.clear()
     codes = [client.post("/v1/responses", json={"input": "hola"}).status_code for _ in range(3)]
     assert codes[-1] == 429
-    m.RATE.clear()
+    main_module.RATE.clear()
 
 
 def test_sin_falso_positivo():
-    # "¿Cómo actúa como líder?" es una pregunta legítima, no una inyección
     r = client.post("/v1/responses", json={"input": "¿Cómo actúa como líder de equipo?"})
     assert "Solo puedo conversar" not in r.json()["output"][0]["content"][0]["text"]
-
 
 
 def test_full_text_incluye_titulos_de_seccion():
     text = agent.retriever.full_text
     assert "Grupo Salinas / Banco Azteca (2017 a 2021)" in text
     assert "BBVA Bancomer (2009 a 2017)" in text
+
+
+def test_endpoint_requires_authentication():
+    response = client.post("/v1/responses", json={"input": "hola"}, headers={"Authorization": ""})
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "invalid_api_key"
+
+
+def test_llm_health_requires_authentication():
+    response = client.get("/health/llm", headers={"Authorization": ""})
+    assert response.status_code == 401
+
+
+def test_request_body_limit(monkeypatch):
+    monkeypatch.setattr(main_module.config, "MAX_REQUEST_BYTES", 32)
+    response = client.post("/v1/responses", content='{"input":"' + ("x" * 40) + '"}',
+                           headers={"Content-Type": "application/json"})
+    assert response.status_code == 413
