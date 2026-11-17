@@ -44,3 +44,8 @@ def test_agent_includes_documented_leadership_and_management_scope():
 def test_agent_separates_personal_genai_project_from_enterprise_production():
     assert "proyecto práctico personal" in SYSTEM_PROMPT
     assert "nunca como solución empresarial desplegada para un empleador" in SYSTEM_PROMPT
+
+
+def test_agent_uses_star_and_evidence_based_technical_interview_answers():
+    assert "resultado (STAR)" in SYSTEM_PROMPT
+    assert "trade-offs únicamente cuando estén documentados" in SYSTEM_PROMPT
