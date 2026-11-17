@@ -41,16 +41,20 @@ Respuesta ◄── Verificación de salida ◄── LLM (API compatible con Op
 4. **Honestidad antes que impresionar.** El prompt obliga a responder solo con el CV, a decir
    cuando algo no está y a aclarar lo que se conoce solo por cursos. El agente reconoce que Hugo
    todavía no ha puesto en producción IA generativa para un empleador.
-5. **Seguridad (OWASP LLM Top 10, nivel básico).** El rol de sistema lo define el servidor (se
-   ignoran mensajes `system`/`developer` del cliente), se detecta prompt injection, se limita el
-   tamaño de entrada y el CV no incluye datos privados (el teléfono no está en la base).
+5. **Seguridad (OWASP LLM Top 10, nivel básico).** El rol de sistema lo define el servidor; el
+   backend rechaza roles `system`/`developer` y mensajes malformados del cliente, valida la
+   alternancia `user`/`assistant`, detecta patrones de prompt injection y limita el tamaño del body.
 6. **Verificación de salida.** Cada respuesta revisa si contiene cifras que no existen en el CV
    (`ungrounded_numbers` en `metadata`): es una señal barata de alucinación que queda en los logs.
-7. **Límite de uso.** Máximo 30 solicitudes por minuto por IP (configurable con `RATE_LIMIT_PER_MIN`), con error 429 tipado.
+7. **Límite de uso.** Máximo 30 solicitudes por ventana/IP (configurable con `RATE_LIMIT_PER_MIN` y
+   `RATE_WINDOW_SECONDS`). Con `REDIS_URL`, el contador Lua es atómico y compartido entre instancias;
+   el identificador IP se almacena como hash. Sin Redis, el fallback local es solo para desarrollo
+   o una instancia.
 8. **Observabilidad.** Cada respuesta registra fuentes usadas, latencia y tokens en logs JSON, y
    devuelve fuentes y latencia en `metadata`.
-9. **Despliegue serverless.** Vercel (o cualquier contenedor con el `Dockerfile`). Sin servidores
-   que administrar; las llaves viven en variables de entorno, nunca en el código.
+9. **Despliegue serverless.** Vercel (o cualquier contenedor con el `Dockerfile`). Las llaves viven
+   en variables de entorno, nunca en el código. Configura Redis para persistir `previous_response_id`
+   entre instancias y compartir el rate limit; las sesiones expiran según `SESSION_TTL_SECONDS`.
 
 ## Correr en local
 
@@ -59,10 +63,12 @@ pip install -r requirements.txt
 cp .env.example .env   # agrega tu LLM_API_KEY
 export $(cat .env | xargs) && uvicorn app.main:app --reload
 curl -s localhost:8000/v1/responses -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $AGENT_API_KEY" \
   -d '{"model":"hugo-cv-agent","input":"¿Cuál es el logro principal de Hugo?"}'
 ```
 
-Pruebas sin llave: `LLM_PROVIDER=mock python -m pytest -q tests`
+Pruebas sin llave: `LLM_PROVIDER=mock python -m pytest -q tests`. Para ejecutar la prueba de
+integración real con Redis, define `TEST_REDIS_URL` (GitHub Actions inicia un Redis efímero).
 
 ## Evaluación
 
@@ -77,8 +83,12 @@ Las pruebas de `tests/` validan el contrato (objeto `response`, items `message`/
 
 ## Limitaciones conocidas y siguientes pasos
 
-- La memoria de `previous_response_id` vive en memoria del proceso: en serverless puede perderse
-  entre invocaciones. Siguiente paso: guardarla en Redis o Postgres con expiración.
+- Sin `REDIS_URL`, la memoria de `previous_response_id` vive en el proceso y puede perderse
+  entre invocaciones serverless. En producción multi-instancia configura `REDIS_URL`; Redis guarda
+  el historial con TTL y el servicio falla en modo cerrado si el Redis configurado no está disponible.
+- `TRUST_PROXY_HEADERS` está desactivado por defecto. Actívalo solo si el proveedor de hosting
+  sobrescribe `x-real-ip` y se ha verificado que el cliente no puede suplantarlo.
+- `CORS_ORIGINS` debe contener los orígenes exactos del frontend; no se permiten comodines.
 - La detección de inyección es por patrones; el siguiente paso es un clasificador dedicado.
 - Siguiente paso de evaluación: LLM-as-judge para groundedness con Ragas o DeepEval.
 
