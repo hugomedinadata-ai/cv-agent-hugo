@@ -39,12 +39,24 @@ def parse_input(raw) -> list[dict]:
     return history
 
 
+def _valid_alternation(history: list[dict]) -> bool:
+    if not history or history[0].get("role") != "user":
+        return False
+    return all(isinstance(message, dict)
+               and message.get("role") == ("user" if index % 2 == 0 else "assistant")
+               and isinstance(message.get("content"), str)
+               and bool(message["content"].strip())
+               for index, message in enumerate(history))
+
+
 def validate_history(history: list[dict]) -> bool:
     """Enforce a user-started, alternating conversation ending in a user turn."""
-    if not history or history[0]["role"] != "user" or history[-1]["role"] != "user":
-        return False
-    return all(message["role"] == ("user" if index % 2 == 0 else "assistant")
-               for index, message in enumerate(history))
+    return bool(_valid_alternation(history) and history[-1]["role"] == "user")
+
+
+def validate_stored_history(history: list[dict]) -> bool:
+    """Validate a persisted conversation ending in the assistant response."""
+    return bool(_valid_alternation(history) and history[-1]["role"] == "assistant")
 
 
 def message_item(text: str, item_id: str, status: str = "completed") -> dict:
