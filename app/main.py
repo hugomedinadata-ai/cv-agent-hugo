@@ -1,5 +1,6 @@
 """Servicio HTTP del agente de CV, compatible con Open Responses."""
 import hmac
+import ipaddress
 import json
 import logging
 import time
@@ -15,7 +16,7 @@ from . import config
 from .agent import CVAgent, INJECTION_REPLY
 from .guardrails import ungrounded_numbers
 from .llm import LLMError
-from .openresponses import message_item, new_id, parse_input, response_obj, stream_events
+from .openresponses import message_item, new_id, parse_input, response_obj, stream_events, validate_history
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("cv-agent")
@@ -39,6 +40,10 @@ redis_client = Redis.from_url(config.REDIS_URL, decode_responses=True) if config
 
 class RateLimitStoreUnavailable(Exception):
     """Raised when the configured shared rate-limit store cannot be reached."""
+
+
+class SessionStoreUnavailable(Exception):
+    """Raised when the configured shared session store cannot be reached."""
 
 
 
@@ -81,8 +86,36 @@ def error(status: int, etype: str, message: str, code: str | None = None, param:
     return JSONResponse(status_code=status, content={"error": {"type": etype, "code": code, "param": param, "message": message}})
 
 
-def remember(resp_id: str, history: list, answer: str):
-    STORE[resp_id] = history + [{"role": "assistant", "content": answer}]
+def session_key(resp_id: str) -> str:
+    return f"cv-agent:session:{resp_id}"
+
+
+async def load_history(resp_id: str) -> list | None:
+    if redis_client is not None:
+        try:
+            stored = await redis_client.get(session_key(resp_id))
+            return json.loads(stored) if stored else None
+        except Exception as exc:
+            log.exception("session_store_unavailable")
+            raise SessionStoreUnavailable from exc
+    return STORE.get(resp_id)
+
+
+async def remember(resp_id: str, history: list, answer: str):
+    complete_history = history + [{"role": "assistant", "content": answer}]
+    if redis_client is not None:
+        try:
+            await redis_client.setex(
+                session_key(resp_id),
+                config.SESSION_TTL_SECONDS,
+                json.dumps(complete_history, ensure_ascii=False),
+            )
+            return
+        except Exception as exc:
+            log.exception("session_store_unavailable")
+            raise SessionStoreUnavailable from exc
+    STORE[resp_id] = complete_history
+    STORE.move_to_end(resp_id)
     while len(STORE) > STORE_MAX:
         STORE.popitem(last=False)
 
@@ -108,8 +141,14 @@ async def create_response(request: Request, authorization: str | None = Header(d
     if not authorized(authorization):
         return error(401, "invalid_request", "API key inválida o ausente.", "invalid_api_key")
 
-    # No confiar en X-Forwarded-For enviado por el cliente: puede falsificarse.
+    # Trust proxy-provided client IP only when explicitly enabled for a trusted host.
     ip = request.client.host if request.client else "unknown"
+    if config.TRUST_PROXY_HEADERS:
+        forwarded_ip = request.headers.get("x-real-ip", "").strip()
+        try:
+            ip = str(ipaddress.ip_address(forwarded_ip))
+        except ValueError:
+            pass
     try:
         limited = await rate_limited(ip)
     except RateLimitStoreUnavailable:
@@ -145,14 +184,29 @@ async def create_response(request: Request, authorization: str | None = Header(d
 
     prev = body.get("previous_response_id")
     history = []
-    if prev:
-        if not isinstance(prev, str) or prev not in STORE:
+    if prev is not None:
+        if not isinstance(prev, str) or not prev:
+            return error(400, "invalid_request", "previous_response_id debe ser una cadena no vacía.",
+                         "invalid_previous_response_id", "previous_response_id")
+        try:
+            previous_history = await load_history(prev)
+        except SessionStoreUnavailable:
+            response = error(503, "server_error", "El almacenamiento de conversaciones no está disponible.",
+                             "session_store_unavailable")
+            response.headers["Retry-After"] = "5"
+            return response
+        if previous_history is None:
             return error(404, "not_found", "Previous response not found.",
                          "previous_response_not_found", "previous_response_id")
-        history = list(STORE[prev])
-    history += parse_input(body["input"])
-    if not history or history[-1]["role"] != "user":
-        return error(400, "invalid_request", "No hay un mensaje de usuario que responder.", param="input")
+        history = list(previous_history)
+    try:
+        history += parse_input(body["input"])
+    except ValueError:
+        return error(400, "invalid_request", "El campo input debe contener texto o mensajes válidos.",
+                     "invalid_input", "input")
+    if not validate_history(history):
+        return error(400, "invalid_request", "La conversación debe iniciar con usuario y alternar roles hasta terminar en usuario.",
+                     "invalid_conversation", "input")
 
     model = body.get("model") or MODEL_NAME
     resp_id = new_id("resp")
@@ -163,10 +217,10 @@ async def create_response(request: Request, authorization: str | None = Header(d
         msgs, meta = agent.prepare(history)
         chunks = iter([INJECTION_REPLY]) if msgs is None else agent.llm.stream(msgs)
 
-        def finalize(text):
+        async def finalize(text):
             meta["ungrounded_numbers"] = ungrounded_numbers(text, agent.retriever.full_text)
             meta["latency_ms"] = int((time.time() - t0) * 1000)
-            remember(resp_id, history, text)
+            await remember(resp_id, history, text)
             log.info(json.dumps({"event": "answer", "stream": True, "id": resp_id, **meta}, ensure_ascii=False))
             return {"sources": ", ".join(meta.get("sources", []))[:500],
                     "ungrounded_numbers": ",".join(meta["ungrounded_numbers"]),
@@ -187,7 +241,13 @@ async def create_response(request: Request, authorization: str | None = Header(d
     except Exception:
         log.exception("unexpected_error")
         return error(500, "server_error", "Error interno del agente.", "internal_error")
-    remember(resp_id, history, text)
+    try:
+        await remember(resp_id, history, text)
+    except SessionStoreUnavailable:
+        response = error(503, "server_error", "La respuesta no pudo guardarse para continuar la conversación.",
+                         "session_store_unavailable")
+        response.headers["Retry-After"] = "5"
+        return response
     out = response_obj(resp_id, model, int(t0), "completed", [message_item(text, new_id("msg"))],
                        usage=usage, prev=prev,
                        metadata={"sources": ", ".join(meta.get("sources", []))[:500],
