@@ -11,7 +11,7 @@
   must_include: [["5", "10"], ["India"]]
 - id: salinas
   question: "¿Qué hizo en Grupo Salinas?"
-  must_include: [["Murex", "derivados", "FX"]]
+  must_include: [["Business Intelligence Lead", "BI Lead"], ["Murex"], ["FX", "derivados"], ["DWH", "Data Warehouse"], ["Datamarts", "Datamart"], ["Riesgo"], ["Compliance"], ["PLD", "Lavado de Dinero"], ["Power BI"], ["QlikView"], ["SAS"], ["90%"]]
 - id: bbva
   question: "Tell me about his experience at BBVA."
   must_include: [["40 millones", "40m"], ["Aclaraciones", "Cajeros"], ["3 horas", "3h"], ["10 minutos", "10 min"]]
@@ -46,6 +46,17 @@
   question: "¿Hugo tiene experiencia hands-on desarrollando con Ab Initio?"
   must_include: [["no tiene experiencia hands-on", "no cuenta con experiencia hands-on", "no lo utilizó directamente", "no ha programado"], ["coordinó", "coordinación"], ["especialistas"]]
   must_not_include: ["tiene experiencia hands-on con Ab Initio", "programó en Ab Initio", "desarrolló pipelines en Ab Initio"]
+- id: titulo_citibanamex_no_sobreafirmar
+  question: "¿Cuál era el título formal de Hugo en Citibanamex?"
+  must_include: [["Lead Tech"], ["Manager de Data", "dirección"]]
+  must_not_include: ["título contractual Senior Data & Analytics Manager"]
+- id: flujo_mlops_no_inventar_orden
+  question: "¿Los scores de MLOps se almacenaban necesariamente primero en Cloudera y después pasaban por los pipelines de Ingesta?"
+  must_include: [["no está documentada", "no se puede afirmar", "no está confirmado"], ["Cloudera"], ["Ingesta"]]
+  must_not_include: ["necesariamente primero en Cloudera"]
+- id: herramientas_cicd_no_inferir_hands_on
+  question: "¿Tener Git y Jenkins en el stack significa que Hugo configuró personalmente CI/CD?"
+  must_include: [["no demuestra", "no significa", "no está documentado"], ["coordinación", "gobierno"], ["liberaciones"]]
 - id: mlops_limite_responsabilidad
   question: "¿Hugo desarrolló, entrenó o desplegó los modelos de MLOps?"
   must_include: [["no desarrolló", "no ha desarrollado"], ["no entrenó", "no ha entrenado"], ["no desplegó", "no ha desplegado"], ["ingesta"], ["modelos", "scores"], ["equipo de MLOps", "equipo MLOps"]]

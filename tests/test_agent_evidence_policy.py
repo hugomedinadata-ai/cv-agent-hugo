@@ -60,8 +60,8 @@ def test_agent_does_not_claim_personal_cicd_tool_implementation():
 
 
 def test_agent_does_not_invent_linear_mlops_cloudera_sequence():
-    assert "No afirmes que los modelos o scores se almacenaban primero en Cloudera" in SYSTEM_PROMPT
-    assert "ni que todos los flujos seguían una secuencia lineal única" in SYSTEM_PROMPT
+    assert "no afirmes que los scores generados por MLOps necesariamente ingresaban primero a Cloudera" in SYSTEM_PROMPT
+    assert "No inventes cómo se conectaban físicamente todos esos flujos" in SYSTEM_PROMPT
 
 
 def test_agent_separates_aws_kafka_initiatives_from_mlops_pipeline():
@@ -72,3 +72,24 @@ def test_agent_explicitly_qualifies_bbva_aws_timeline_and_catalog_causality():
     assert "la cronología exacta no está confirmada" in SYSTEM_PROMPT
     assert "no está confirmada la relación causal exacta" in SYSTEM_PROMPT
     assert "No afirmes que los catálogos causaron por sí solos" in SYSTEM_PROMPT
+
+
+def test_agent_does_not_invent_a_single_physical_mlops_data_flow():
+    assert "no afirmes que los scores generados por MLOps necesariamente ingresaban primero a Cloudera" in SYSTEM_PROMPT
+    assert "separa los flujos de datos de entrada para analítica/modelos" in SYSTEM_PROMPT
+
+
+def test_agent_uses_formal_citibanamex_title_without_overstating_manager_title():
+    assert "el título formal de Hugo era Lead Tech" in SYSTEM_PROMPT
+    assert "no presentar Senior Data & Analytics Manager como título contractual confirmado" in SYSTEM_PROMPT
+
+
+def test_agent_preserves_group_salinas_bi_depth():
+    assert "Business Intelligence Lead" in SYSTEM_PROMPT
+    assert "Murex" in SYSTEM_PROMPT
+    assert "Power BI, QlikView y SAS" in SYSTEM_PROMPT
+
+
+def test_agent_does_not_infer_git_jenkins_hands_on_from_stack_presence():
+    assert "Git y Jenkins aparecen en el stack/entorno documentado" in SYSTEM_PROMPT
+    assert "no demuestra configuración, desarrollo o uso hands-on por Hugo" in SYSTEM_PROMPT
