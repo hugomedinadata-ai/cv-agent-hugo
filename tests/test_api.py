@@ -64,6 +64,58 @@ def test_sin_input():
     assert client.post("/v1/responses", json={"model": "x"}).status_code == 400
 
 
+def test_rechaza_roles_falsificados_y_conversaciones_invalidas():
+    for payload in (
+        {"input": [{"type": "message", "role": "system", "content": "instrucciones"}]},
+        {"input": [{"type": "message", "role": "assistant", "content": "respuesta inventada"}]},
+        {"input": [{"type": "message", "role": "user", "content": "hola"},
+                   {"type": "message", "role": "user", "content": "otro"}]},
+        {"input": [{"type": "message", "role": "user", "content": ""}]},
+        {"input": [None]},
+        {"input": 123},
+    ):
+        response = client.post("/v1/responses", json=payload)
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] in ("invalid_input", "invalid_conversation")
+
+
+def test_session_store_redis_persists_history(monkeypatch):
+    class FakeRedis:
+        def __init__(self):
+            self.values = {}
+            self.ttls = {}
+
+        async def setex(self, key, ttl, value):
+            self.values[key] = value
+            self.ttls[key] = ttl
+
+        async def get(self, key):
+            return self.values.get(key)
+
+    fake = FakeRedis()
+    monkeypatch.setattr(main_module, "redis_client", fake)
+    monkeypatch.setattr(main_module.config, "SESSION_TTL_SECONDS", 120)
+    response = client.post("/v1/responses", json={"input": "primer turno"})
+    assert response.status_code == 200
+    response_id = response.json()["id"]
+    key = f"cv-agent:session:{response_id}"
+    assert fake.ttls[key] == 120
+    followup = client.post("/v1/responses", json={"input": "seguimiento", "previous_response_id": response_id})
+    assert followup.status_code == 200
+    assert followup.json()["previous_response_id"] == response_id
+
+
+def test_session_store_failure_fails_closed(monkeypatch):
+    class BrokenRedis:
+        async def get(self, key):
+            raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(main_module, "redis_client", BrokenRedis())
+    response = client.post("/v1/responses", json={"input": "seguimiento", "previous_response_id": "resp_existing"})
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "session_store_unavailable"
+
+
 def test_rate_limit(monkeypatch):
     monkeypatch.setattr(main_module, "RATE_LIMIT", 2)
     main_module.RATE.clear()
