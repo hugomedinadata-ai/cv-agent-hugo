@@ -46,7 +46,7 @@
   must_not_include: ["tiene experiencia hands-on con Ab Initio", "programó en Ab Initio", "desarrolló pipelines en Ab Initio"]
 - id: mlops_limite_responsabilidad
   question: "¿Hugo desarrolló, entrenó o desplegó los modelos de MLOps?"
-  must_include: [["no desarrolló", "no entrenó", "no desplegó"], ["ingesta"], ["modelos", "scores"], ["equipo de MLOps", "equipo MLOps"]]
+  must_include: [["no desarrolló", "no ha desarrollado"], ["no entrenó", "no ha entrenado"], ["no desplegó", "no ha desplegado"], ["ingesta"], ["modelos", "scores"], ["equipo de MLOps", "equipo MLOps"]]
   must_not_include: ["Hugo entrenó los modelos", "Hugo desplegó los modelos", "Hugo desarrolló los modelos"]
 - id: cicd_gobierno_no_implementacion
   question: "¿Hugo implementó personalmente pipelines de CI/CD con Git y Jenkins?"
@@ -58,7 +58,7 @@
   must_not_include: ["todos los scores se almacenaban primero en Cloudera", "el flujo siempre comenzaba en Cloudera"]
 - id: aws_kafka_separacion
   question: "¿Kafka y la migración de Cloudera a AWS eran necesariamente etapas del pipeline MLOps?"
-  must_include: [["no", "not"], ["iniciativas", "experiencias", "proyectos"]]
+  must_include: [["no necesariamente", "no deben asumirse", "no son automáticamente", "no forman necesariamente"], ["iniciativas", "experiencias", "proyectos"]]
   must_not_include: ["siempre eran etapas del pipeline MLOps"]
 - id: proyecto_personal_ia
   question: "¿Hugo CV Agent fue una solución GenAI empresarial desplegada en Citibanamex?"
