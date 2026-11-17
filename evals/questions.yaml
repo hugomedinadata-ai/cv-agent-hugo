@@ -14,7 +14,13 @@
   must_include: [["Murex", "derivados", "FX"]]
 - id: bbva
   question: "Tell me about his experience at BBVA."
-  must_include: [["40"], ["AWS", "S3", "EMR"]]
+  must_include: [["40"], ["AWS", "S3", "EMR"], ["2009"], ["2017"]]
+- id: bbva_periodo_aws
+  question: "¿Durante qué periodo utilizó Hugo AWS S3 y EMR en BBVA?"
+  must_include: [["todo su periodo", "todo el periodo", "a lo largo de todo", "2009–2017", "2009 a 2017"], ["S3"], ["EMR"]]
+- id: bbva_catalogos_impacto_directo
+  question: "¿Qué impacto tuvieron los cinco catálogos descriptivos que construyó Hugo en BBVA?"
+  must_include: [["5 catálogos", "cinco catálogos"], ["30%"], ["10%"], ["directamente", "resultado directo", "como resultado"]]
 - id: ingles
   question: "¿Qué nivel de inglés tiene?"
   must_include: [["B2"]]
