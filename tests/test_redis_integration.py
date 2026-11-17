@@ -14,7 +14,9 @@ def test_real_redis_rate_limit_and_session_roundtrip():
     async def exercise():
         client = Redis.from_url(os.environ["TEST_REDIS_URL"], decode_responses=True)
         original_client = main.redis_client
+        original_limit = main.RATE_LIMIT
         main.redis_client = client
+        main.RATE_LIMIT = 1
         suffix = uuid.uuid4().hex
         ip = f"198.51.100.{int(suffix[:2], 16) % 254 + 1}"
         response_id = f"resp_{suffix}"
@@ -22,6 +24,7 @@ def test_real_redis_rate_limit_and_session_roundtrip():
         session_key = main.session_key(response_id)
         try:
             assert await main.rate_limited(ip) is False
+            assert await main.rate_limited(ip) is True
             await main.remember(response_id, [{"role": "user", "content": "hola"}], "respuesta")
             stored = await main.load_history(response_id)
             assert stored == [
@@ -31,6 +34,7 @@ def test_real_redis_rate_limit_and_session_roundtrip():
             assert await client.ttl(session_key) > 0
         finally:
             main.redis_client = original_client
+            main.RATE_LIMIT = original_limit
             await client.delete(rate_key, session_key)
             await client.aclose()
 
