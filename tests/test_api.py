@@ -1,5 +1,6 @@
 """Pruebas de contrato con un modelo simulado (no requiere llave ni red)."""
 import asyncio
+import hashlib
 import json
 import os
 
@@ -85,6 +86,10 @@ def test_session_store_redis_persists_history(monkeypatch):
             self.values = {}
             self.ttls = {}
 
+        async def eval(self, script, number_of_keys, key, window):
+            self.count = getattr(self, "count", 0) + 1
+            return self.count
+
         async def setex(self, key, ttl, value):
             self.values[key] = value
             self.ttls[key] = ttl
@@ -107,6 +112,9 @@ def test_session_store_redis_persists_history(monkeypatch):
 
 def test_session_store_failure_fails_closed(monkeypatch):
     class BrokenRedis:
+        async def eval(self, script, number_of_keys, key, window):
+            return 1
+
         async def get(self, key):
             raise RuntimeError("redis unavailable")
 
@@ -160,7 +168,7 @@ def test_redis_rate_limit_uses_shared_counter(monkeypatch):
 
         async def eval(self, script, number_of_keys, key, window):
             assert number_of_keys == 1
-            assert key == "cv-agent:rate:203.0.113.10"
+            assert key == f"cv-agent:rate:{hashlib.sha256(b'203.0.113.10').hexdigest()}"
             assert window == main_module.config.RATE_WINDOW_SECONDS
             self.count += 1
             return self.count
