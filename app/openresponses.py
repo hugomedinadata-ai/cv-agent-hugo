@@ -89,9 +89,10 @@ async def stream_events(resp_id, model, prev, chunks, finalize):
             text += delta
             yield ev(type="response.output_text.delta", item_id=item_id, output_index=0,
                      content_index=0, delta=delta, logprobs=[])
-    except Exception as e:  # el modelo falló a mitad del stream
+    except Exception:  # no exponer mensajes crudos del proveedor ni credenciales
         failed = response_obj(resp_id, model, created, "failed", [], prev=prev)
-        failed["error"] = {"type": "model_error", "code": "model_error", "message": str(e)[:200]}
+        failed["error"] = {"type": "server_error", "code": "stream_failed",
+                           "message": "The response stream could not be completed."}
         yield ev(type="error", error=failed["error"])
         yield ev(type="response.failed", response=failed)
         return
@@ -100,5 +101,14 @@ async def stream_events(resp_id, model, prev, chunks, finalize):
     yield ev(type="response.content_part.done", item_id=item_id, output_index=0, content_index=0, part=part)
     item = message_item(text, item_id)
     yield ev(type="response.output_item.done", output_index=0, item=item)
-    final = response_obj(resp_id, model, created, "completed", [item], prev=prev, metadata=await finalize(text))
+    try:
+        metadata = await finalize(text)
+    except Exception:
+        failed = response_obj(resp_id, model, created, "failed", [], prev=prev)
+        failed["error"] = {"type": "server_error", "code": "session_store_unavailable",
+                           "message": "The conversation could not be saved."}
+        yield ev(type="error", error=failed["error"])
+        yield ev(type="response.failed", response=failed)
+        return
+    final = response_obj(resp_id, model, created, "completed", [item], prev=prev, metadata=metadata)
     yield ev(type="response.completed", response=final)
