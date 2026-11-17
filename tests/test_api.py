@@ -1,6 +1,9 @@
 """Pruebas de contrato con un modelo simulado (no requiere llave ni red)."""
+import asyncio
 import json
 import os
+
+import pytest
 
 os.environ["LLM_PROVIDER"] = "mock"
 os.environ["AGENT_API_KEY"] = "test-agent-key"
@@ -96,3 +99,33 @@ def test_request_body_limit(monkeypatch):
     response = client.post("/v1/responses", content='{"input":"' + ("x" * 40) + '"}',
                            headers={"Content-Type": "application/json"})
     assert response.status_code == 413
+
+
+def test_redis_rate_limit_uses_shared_counter(monkeypatch):
+    class FakeRedis:
+        def __init__(self):
+            self.count = 0
+
+        async def eval(self, script, number_of_keys, key, window):
+            assert number_of_keys == 1
+            assert key == "cv-agent:rate:203.0.113.10"
+            assert window == main_module.config.RATE_WINDOW_SECONDS
+            self.count += 1
+            return self.count
+
+    fake = FakeRedis()
+    monkeypatch.setattr(main_module, "redis_client", fake)
+    monkeypatch.setattr(main_module, "RATE_LIMIT", 2)
+    assert asyncio.run(main_module.rate_limited("203.0.113.10")) is False
+    assert asyncio.run(main_module.rate_limited("203.0.113.10")) is False
+    assert asyncio.run(main_module.rate_limited("203.0.113.10")) is True
+
+
+def test_redis_failure_fails_closed(monkeypatch):
+    class BrokenRedis:
+        async def eval(self, *args):
+            raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(main_module, "redis_client", BrokenRedis())
+    with pytest.raises(main_module.RateLimitStoreUnavailable):
+        asyncio.run(main_module.rate_limited("203.0.113.11"))
