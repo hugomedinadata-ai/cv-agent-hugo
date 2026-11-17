@@ -4,6 +4,7 @@ import hashlib
 import ipaddress
 import json
 import logging
+import os
 import time
 from collections import OrderedDict
 
@@ -17,13 +18,13 @@ from . import config
 from .agent import CVAgent, INJECTION_REPLY
 from .guardrails import ungrounded_numbers
 from .llm import LLMError
-from .openresponses import message_item, new_id, parse_input, response_obj, stream_events, validate_history
+from .openresponses import message_item, new_id, parse_input, response_obj, stream_events, validate_history, validate_stored_history
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("cv-agent")
 
 app = FastAPI(title="Agente de CV de Hugo Medina", version="1.0.0")
-allowed_origins = [origin.strip() for origin in __import__("os").getenv("CORS_ORIGINS", "").split(",") if origin.strip()]
+allowed_origins = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -32,10 +33,10 @@ app.add_middleware(
 )
 agent = CVAgent()
 MODEL_NAME = "hugo-cv-agent"
-STORE: "OrderedDict[str, list]" = OrderedDict()
+STORE: "OrderedDict[str, tuple[list, float]]" = OrderedDict()
 STORE_MAX = 500
 RATE: dict = {}
-RATE_LIMIT = int(__import__("os").getenv("RATE_LIMIT_PER_MIN", "30"))
+RATE_LIMIT = int(os.getenv("RATE_LIMIT_PER_MIN", "30"))
 redis_client = Redis.from_url(config.REDIS_URL, decode_responses=True) if config.REDIS_URL else None
 
 
@@ -106,7 +107,15 @@ async def load_history(resp_id: str) -> list | None:
         except Exception as exc:
             log.exception("session_store_unavailable")
             raise SessionStoreUnavailable from exc
-    return STORE.get(resp_id)
+    entry = STORE.get(resp_id)
+    if entry is None:
+        return None
+    history, created_at = entry
+    if time.time() - created_at > max(1, config.SESSION_TTL_SECONDS):
+        STORE.pop(resp_id, None)
+        return None
+    STORE.move_to_end(resp_id)
+    return history
 
 
 async def remember(resp_id: str, history: list, answer: str):
@@ -122,7 +131,7 @@ async def remember(resp_id: str, history: list, answer: str):
         except Exception as exc:
             log.exception("session_store_unavailable")
             raise SessionStoreUnavailable from exc
-    STORE[resp_id] = complete_history
+    STORE[resp_id] = (complete_history, time.time())
     STORE.move_to_end(resp_id)
     while len(STORE) > STORE_MAX:
         STORE.popitem(last=False)
@@ -204,6 +213,9 @@ async def create_response(request: Request, authorization: str | None = Header(d
             response.headers["Retry-After"] = "5"
             return response
         if previous_history is None:
+            return error(404, "not_found", "Previous response not found.",
+                         "previous_response_not_found", "previous_response_id")
+        if not validate_stored_history(previous_history):
             return error(404, "not_found", "Previous response not found.",
                          "previous_response_not_found", "previous_response_id")
         history = list(previous_history)
