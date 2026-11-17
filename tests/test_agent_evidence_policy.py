@@ -28,3 +28,41 @@ def test_agent_keeps_project_metrics_attached_to_the_correct_employer():
     assert "Citibanamex: más de 12 millones de registros diarios" in SYSTEM_PROMPT
     assert "Banco Azteca/Grupo Salinas: 90% menos esfuerzo manual" in SYSTEM_PROMPT
     assert "BBVA: automatización de reportes" in SYSTEM_PROMPT
+
+
+def test_agent_describes_devops_and_cicd_as_coordination_when_that_is_the_evidence():
+    assert "coordinó y gobernó las liberaciones bajo prácticas DevOps y CI/CD" in SYSTEM_PROMPT
+    assert "No afirmes que Hugo diseñó, programó o implementó personalmente" in SYSTEM_PROMPT
+
+
+def test_agent_includes_documented_leadership_and_management_scope():
+    assert "backlog, épicas e historias para hasta tres equipos" in SYSTEM_PROMPT
+    assert "sprints de cuatro semanas" in SYSTEM_PROMPT
+    assert "presupuesto y gestión de proveedores" in SYSTEM_PROMPT
+
+
+def test_agent_separates_personal_genai_project_from_enterprise_production():
+    assert "proyecto práctico personal" in SYSTEM_PROMPT
+    assert "nunca como solución empresarial desplegada para un empleador" in SYSTEM_PROMPT
+
+
+def test_agent_uses_star_and_evidence_based_technical_interview_answers():
+    assert "resultado (STAR)" in SYSTEM_PROMPT
+    assert "trade-offs únicamente cuando estén documentados" in SYSTEM_PROMPT
+
+
+
+def test_agent_does_not_claim_personal_cicd_tool_implementation():
+    assert "no demuestra configuración o uso hands-on por Hugo" in SYSTEM_PROMPT
+    assert "Control-M o Airflow como herramientas CI/CD" in SYSTEM_PROMPT
+    assert "AWS CloudFormation debe describirse como aprovisionamiento de infraestructura" in SYSTEM_PROMPT
+    assert "No atribuyas causalidad exclusiva a CI/CD" in SYSTEM_PROMPT
+
+
+def test_agent_does_not_invent_linear_mlops_cloudera_sequence():
+    assert "No afirmes que los modelos o scores se almacenaban primero en Cloudera" in SYSTEM_PROMPT
+    assert "ni que todos los flujos seguían una secuencia lineal única" in SYSTEM_PROMPT
+
+
+def test_agent_separates_aws_kafka_initiatives_from_mlops_pipeline():
+    assert "no las presentes automáticamente como etapas del mismo pipeline MLOps" in SYSTEM_PROMPT
