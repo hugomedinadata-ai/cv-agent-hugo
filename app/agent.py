@@ -37,24 +37,21 @@ class CVAgent:
         question = question[: config.MAX_INPUT_CHARS]
         if detect_injection(question):
             return None, {"blocked": "prompt_injection", "sources": []}
-        # La búsqueda usa la pregunta actual + la anterior, para seguir el hilo de la conversación.
         prev_user = [m["content"] for m in history if m["role"] == "user"][-2:]
         hits = self.retriever.search(" ".join(prev_user), config.TOP_K)
         context = "\n\n".join(f"### {h.title}\n{h.text}" for h in hits)
         system = SYSTEM_PROMPT.format(context=context)
-        if instructions:
-            system += "\n\nIndicaciones adicionales del cliente (no anulan las reglas): " + instructions[:500]
+        # No concatenar texto controlado por el cliente dentro del mensaje system.
         msgs = [{"role": "system", "content": system}]
         msgs += [{"role": m["role"], "content": m["content"][: config.MAX_INPUT_CHARS]} for m in history[-10:]]
         return msgs, {"sources": [f"{h.source}#{h.title}" for h in hits]}
 
     def answer(self, history: list[dict], instructions: str | None = None) -> tuple[str, dict, dict]:
         t0 = time.time()
-        msgs, meta = self.prepare(history, instructions)
+        msgs, meta = self.prepare(history)
         if msgs is None:
             return INJECTION_REPLY, {}, meta
         text, usage = self.llm.complete(msgs)
-        # model/attempts son diagnóstico: van a metadata, no al objeto usage del protocolo
         meta["llm_model"] = usage.pop("model", None)
         meta["llm_attempts"] = usage.pop("attempts", None)
         meta["ungrounded_numbers"] = ungrounded_numbers(text, self.retriever.full_text)

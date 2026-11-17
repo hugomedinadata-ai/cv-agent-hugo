@@ -1,12 +1,20 @@
 """Pruebas de contrato con un modelo simulado (no requiere llave ni red)."""
+import asyncio
+import hashlib
 import json
 import os
 
+import pytest
+
 os.environ["LLM_PROVIDER"] = "mock"
+os.environ["AGENT_API_KEY"] = "test-agent-key"
 from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app, agent  # noqa: E402
+import app.main as main_module  # noqa: E402
 
-client = TestClient(app)
+# config may already be imported by other test modules before this module sets the env var.
+main_module.config.AGENT_API_KEY = "test-agent-key"
+client = TestClient(app, headers={"Authorization": "Bearer test-agent-key"})
 
 
 def test_health():
@@ -57,23 +65,127 @@ def test_sin_input():
     assert client.post("/v1/responses", json={"model": "x"}).status_code == 400
 
 
+def test_rechaza_roles_falsificados_y_conversaciones_invalidas():
+    for payload in (
+        {"input": [{"type": "message", "role": "system", "content": "instrucciones"}]},
+        {"input": [{"type": "message", "role": "assistant", "content": "respuesta inventada"}]},
+        {"input": [{"type": "message", "role": "user", "content": "hola"},
+                   {"type": "message", "role": "user", "content": "otro"}]},
+        {"input": [{"type": "message", "role": "user", "content": ""}]},
+        {"input": [None]},
+        {"input": 123},
+    ):
+        response = client.post("/v1/responses", json=payload)
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] in ("invalid_input", "invalid_conversation")
+
+
+def test_session_store_redis_persists_history(monkeypatch):
+    class FakeRedis:
+        def __init__(self):
+            self.values = {}
+            self.ttls = {}
+
+        async def eval(self, script, number_of_keys, key, window):
+            self.count = getattr(self, "count", 0) + 1
+            return self.count
+
+        async def setex(self, key, ttl, value):
+            self.values[key] = value
+            self.ttls[key] = ttl
+
+        async def get(self, key):
+            return self.values.get(key)
+
+    fake = FakeRedis()
+    monkeypatch.setattr(main_module, "redis_client", fake)
+    monkeypatch.setattr(main_module.config, "SESSION_TTL_SECONDS", 120)
+    response = client.post("/v1/responses", json={"input": "primer turno"})
+    assert response.status_code == 200
+    response_id = response.json()["id"]
+    key = f"cv-agent:session:{response_id}"
+    assert fake.ttls[key] == 120
+    followup = client.post("/v1/responses", json={"input": "seguimiento", "previous_response_id": response_id})
+    assert followup.status_code == 200
+    assert followup.json()["previous_response_id"] == response_id
+
+
+def test_session_store_failure_fails_closed(monkeypatch):
+    class BrokenRedis:
+        async def eval(self, script, number_of_keys, key, window):
+            return 1
+
+        async def get(self, key):
+            raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(main_module, "redis_client", BrokenRedis())
+    response = client.post("/v1/responses", json={"input": "seguimiento", "previous_response_id": "resp_existing"})
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "session_store_unavailable"
+
+
 def test_rate_limit(monkeypatch):
-    import app.main as m
-    monkeypatch.setattr(m, "RATE_LIMIT", 2)
-    m.RATE.clear()
+    monkeypatch.setattr(main_module, "RATE_LIMIT", 2)
+    main_module.RATE.clear()
     codes = [client.post("/v1/responses", json={"input": "hola"}).status_code for _ in range(3)]
     assert codes[-1] == 429
-    m.RATE.clear()
+    main_module.RATE.clear()
 
 
 def test_sin_falso_positivo():
-    # "¿Cómo actúa como líder?" es una pregunta legítima, no una inyección
     r = client.post("/v1/responses", json={"input": "¿Cómo actúa como líder de equipo?"})
     assert "Solo puedo conversar" not in r.json()["output"][0]["content"][0]["text"]
-
 
 
 def test_full_text_incluye_titulos_de_seccion():
     text = agent.retriever.full_text
     assert "Grupo Salinas / Banco Azteca (2017 a 2021)" in text
     assert "BBVA Bancomer (2009 a 2017)" in text
+
+
+def test_endpoint_requires_authentication():
+    response = client.post("/v1/responses", json={"input": "hola"}, headers={"Authorization": ""})
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "invalid_api_key"
+
+
+def test_llm_health_requires_authentication():
+    response = client.get("/health/llm", headers={"Authorization": ""})
+    assert response.status_code == 401
+
+
+def test_request_body_limit(monkeypatch):
+    monkeypatch.setattr(main_module.config, "MAX_REQUEST_BYTES", 32)
+    response = client.post("/v1/responses", content='{"input":"' + ("x" * 40) + '"}',
+                           headers={"Content-Type": "application/json"})
+    assert response.status_code == 413
+
+
+def test_redis_rate_limit_uses_shared_counter(monkeypatch):
+    class FakeRedis:
+        def __init__(self):
+            self.count = 0
+
+        async def eval(self, script, number_of_keys, key, window):
+            assert number_of_keys == 1
+            assert key == f"cv-agent:rate:{hashlib.sha256(b'203.0.113.10').hexdigest()}"
+            assert window == main_module.config.RATE_WINDOW_SECONDS
+            self.count += 1
+            return self.count
+
+    fake = FakeRedis()
+    monkeypatch.setattr(main_module, "redis_client", fake)
+    monkeypatch.setattr(main_module, "RATE_LIMIT", 2)
+    assert asyncio.run(main_module.rate_limited("203.0.113.10")) is False
+    assert asyncio.run(main_module.rate_limited("203.0.113.10")) is False
+    assert asyncio.run(main_module.rate_limited("203.0.113.10")) is True
+
+
+def test_redis_failure_fails_closed(monkeypatch):
+    class BrokenRedis:
+        async def eval(self, *args):
+            raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(main_module, "redis_client", BrokenRedis())
+    with pytest.raises(main_module.RateLimitStoreUnavailable):
+        asyncio.run(main_module.rate_limited("203.0.113.11"))

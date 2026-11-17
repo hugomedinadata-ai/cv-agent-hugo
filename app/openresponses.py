@@ -18,22 +18,47 @@ def _text_of(content) -> str:
 
 
 def parse_input(raw) -> list[dict]:
-    """Convierte `input` (texto o lista de items) en historial [{role, content}]."""
+    """Valida y convierte input en mensajes user/assistant; nunca degrada roles desconocidos a user."""
     if isinstance(raw, str):
+        if not raw.strip():
+            raise ValueError("input text must not be empty")
         return [{"role": "user", "content": raw}]
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("input must be non-empty text or a message array")
     history = []
-    for item in raw or []:
-        if not isinstance(item, dict):
-            continue
-        if item.get("type", "message") != "message":
-            continue  # function_call, reasoning, etc.: este agente no usa herramientas externas
-        role = item.get("role", "user")
-        if role in ("system", "developer"):
-            continue  # el rol de sistema lo define el servidor (defensa contra inyección)
+    for item in raw:
+        if not isinstance(item, dict) or item.get("type", "message") != "message":
+            raise ValueError("each input item must be a message")
+        role = item.get("role")
+        if role not in ("user", "assistant"):
+            raise ValueError("only user and assistant roles are accepted")
         text = _text_of(item.get("content"))
-        if text:
-            history.append({"role": "assistant" if role == "assistant" else "user", "content": text})
+        if not text.strip():
+            raise ValueError("message content must not be empty")
+        history.append({"role": role, "content": text})
     return history
+
+
+def _valid_alternation(history: list[dict]) -> bool:
+    if not isinstance(history, list) or not history or not isinstance(history[0], dict):
+        return False
+    if history[0].get("role") != "user":
+        return False
+    return all(isinstance(message, dict)
+               and message.get("role") == ("user" if index % 2 == 0 else "assistant")
+               and isinstance(message.get("content"), str)
+               and bool(message["content"].strip())
+               for index, message in enumerate(history))
+
+
+def validate_history(history: list[dict]) -> bool:
+    """Enforce a user-started, alternating conversation ending in a user turn."""
+    return bool(_valid_alternation(history) and history[-1]["role"] == "user")
+
+
+def validate_stored_history(history: list[dict]) -> bool:
+    """Validate a persisted conversation ending in the assistant response."""
+    return bool(_valid_alternation(history) and history[-1]["role"] == "assistant")
 
 
 def message_item(text: str, item_id: str, status: str = "completed") -> dict:
@@ -54,7 +79,7 @@ def sse(event: dict) -> str:
     return f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
-def stream_events(resp_id, model, prev, chunks, finalize):
+async def stream_events(resp_id, model, prev, chunks, finalize):
     """Genera la secuencia de eventos semánticos de la especificación."""
     created = int(time.time())
     item_id = new_id("msg")
@@ -78,9 +103,10 @@ def stream_events(resp_id, model, prev, chunks, finalize):
             text += delta
             yield ev(type="response.output_text.delta", item_id=item_id, output_index=0,
                      content_index=0, delta=delta, logprobs=[])
-    except Exception as e:  # el modelo falló a mitad del stream
+    except Exception:  # no exponer mensajes crudos del proveedor ni credenciales
         failed = response_obj(resp_id, model, created, "failed", [], prev=prev)
-        failed["error"] = {"type": "model_error", "code": "model_error", "message": str(e)[:200]}
+        failed["error"] = {"type": "server_error", "code": "stream_failed",
+                           "message": "The response stream could not be completed."}
         yield ev(type="error", error=failed["error"])
         yield ev(type="response.failed", response=failed)
         return
@@ -89,5 +115,14 @@ def stream_events(resp_id, model, prev, chunks, finalize):
     yield ev(type="response.content_part.done", item_id=item_id, output_index=0, content_index=0, part=part)
     item = message_item(text, item_id)
     yield ev(type="response.output_item.done", output_index=0, item=item)
-    final = response_obj(resp_id, model, created, "completed", [item], prev=prev, metadata=finalize(text))
+    try:
+        metadata = await finalize(text)
+    except Exception:
+        failed = response_obj(resp_id, model, created, "failed", [], prev=prev)
+        failed["error"] = {"type": "server_error", "code": "session_store_unavailable",
+                           "message": "The conversation could not be saved."}
+        yield ev(type="error", error=failed["error"])
+        yield ev(type="response.failed", response=failed)
+        return
+    final = response_obj(resp_id, model, created, "completed", [item], prev=prev, metadata=metadata)
     yield ev(type="response.completed", response=final)
