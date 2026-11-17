@@ -12,7 +12,8 @@ import httpx
 import yaml
 
 REFUSAL_MARKERS = [
-    "no está documentado", "no se encuentra documentado", "no está en la información",
+    "no está documentado", "no está documentada", "no se encuentra documentado",
+    "no se encuentra documentada", "no está en la información",
     "no aparece en la información", "no se menciona en el perfil",
     "no tengo información", "no cuento con información", "no dispongo de información",
     "no puedo confirmar", "no se especifica", "no está especificado",
