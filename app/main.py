@@ -277,3 +277,46 @@ async def create_response(request: Request, authorization: str | None = Header(d
                                  "llm_attempts": str(meta.get("llm_attempts") or "")})
     out["output_text"] = text
     return out
+
+@app.get("/__ops/redis-smoke")
+async def redis_smoke():
+    """Temporary, preview-only smoke test for the configured Redis connection."""
+    if os.getenv("VERCEL_ENV") != "preview":
+        return error(404, "not_found", "Not found.")
+    if redis_client is None:
+        return error(503, "server_error", "Redis is not configured.", "redis_not_configured")
+
+    suffix = str(time.time_ns())
+    probe_key = f"cv-agent:smoke:{suffix}"
+    response_id = f"resp_smoke_{suffix}"
+    test_ip = f"redis-smoke-{suffix}"
+    rate_key = f"cv-agent:rate:{hashlib.sha256(test_ip.encode()).hexdigest()}"
+    results = {"ping": False, "key_roundtrip": False, "session_roundtrip": False,
+               "session_ttl": False, "rate_limit": False}
+    try:
+        results["ping"] = bool(await redis_client.ping())
+        await redis_client.setex(probe_key, 30, "ok")
+        results["key_roundtrip"] = await redis_client.get(probe_key) == "ok"
+        await remember(response_id, [{"role": "user", "content": "smoke"}], "redis-ok")
+        stored = await load_history(response_id)
+        results["session_roundtrip"] = stored == [
+            {"role": "user", "content": "smoke"},
+            {"role": "assistant", "content": "redis-ok"},
+        ]
+        results["session_ttl"] = await redis_client.ttl(session_key(response_id)) > 0
+        limit = min(max(RATE_LIMIT, 1), 100)
+        checks = [await rate_limited(test_ip) for _ in range(limit + 1)]
+        results["rate_limit"] = checks[-1] is True and all(value is False for value in checks[:-1])
+    except Exception:
+        log.exception("redis_smoke_failed")
+    finally:
+        try:
+            await redis_client.delete(probe_key, session_key(response_id), rate_key)
+        except Exception:
+            log.exception("redis_smoke_cleanup_failed")
+
+    ok = all(results.values())
+    return JSONResponse(status_code=200 if ok else 503, content={
+        "status": "ok" if ok else "failed",
+        "checks": results,
+    })
