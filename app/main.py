@@ -1,5 +1,6 @@
 """Servicio HTTP del agente de CV, compatible con Open Responses."""
 import hmac
+import hashlib
 import ipaddress
 import json
 import logging
@@ -59,7 +60,7 @@ def authorized(authorization: str | None) -> bool:
 async def rate_limited(ip: str) -> bool:
     if redis_client is not None:
         # Atomic fixed-window counter shared across all application instances.
-        key = f"cv-agent:rate:{ip}"
+        key = f"cv-agent:rate:{hashlib.sha256(ip.encode()).hexdigest()}"
         script = """
         local count = redis.call('INCR', KEYS[1])
         if count == 1 then
@@ -68,7 +69,7 @@ async def rate_limited(ip: str) -> bool:
         return count
         """
         try:
-            count = await redis_client.eval(script, 1, key, config.RATE_WINDOW_SECONDS)
+            count = await redis_client.eval(script, 1, key, max(1, config.RATE_WINDOW_SECONDS))
         except Exception as exc:
             log.exception("rate_limit_store_unavailable")
             raise RateLimitStoreUnavailable from exc
@@ -76,7 +77,14 @@ async def rate_limited(ip: str) -> bool:
 
     # Local fallback for development and single-instance deployments only.
     now = time.time()
-    hits = [t for t in RATE.get(ip, []) if now - t < config.RATE_WINDOW_SECONDS]
+    if len(RATE) > 1000:
+        for known_ip, timestamps in list(RATE.items()):
+            fresh = [stamp for stamp in timestamps if now - stamp < max(1, config.RATE_WINDOW_SECONDS)]
+            if fresh:
+                RATE[known_ip] = fresh
+            else:
+                RATE.pop(known_ip, None)
+    hits = [t for t in RATE.get(ip, []) if now - t < max(1, config.RATE_WINDOW_SECONDS)]
     hits.append(now)
     RATE[ip] = hits
     return len(hits) > RATE_LIMIT
@@ -107,7 +115,7 @@ async def remember(resp_id: str, history: list, answer: str):
         try:
             await redis_client.setex(
                 session_key(resp_id),
-                config.SESSION_TTL_SECONDS,
+                max(1, config.SESSION_TTL_SECONDS),
                 json.dumps(complete_history, ensure_ascii=False),
             )
             return
