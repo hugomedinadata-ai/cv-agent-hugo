@@ -14,20 +14,20 @@
   must_include: [["Murex", "derivados", "FX"]]
 - id: bbva
   question: "Tell me about his experience at BBVA."
-  must_include: [["40"], ["AWS", "S3", "EMR"], ["2009"], ["2017"]]
+  must_include: [["40 millones", "40m"], ["Aclaraciones", "Cajeros"], ["3 horas", "3h"], ["10 minutos", "10 min"]]
 - id: bbva_periodo_aws_no_asumir_cronologia
   question: "¿Está confirmado que Hugo utilizó AWS S3 y EMR durante todo su periodo en BBVA, de 2009 a 2017?"
-  must_include: [["no está confirmado", "no se puede confirmar", "no está documentado", "no hay evidencia suficiente"], ["S3"], ["EMR"]]
+  must_include: [["no está confirmada", "no se puede confirmar", "no está documentada", "no hay evidencia suficiente"], ["S3"], ["EMR"]]
   must_not_include: ["durante todo el periodo 2009", "a lo largo de todo 2009–2017"]
 - id: bbva_catalogos_causalidad_no_asumir
   question: "¿Está documentado que los cinco catálogos descriptivos causaron por sí solos la reducción de procesamiento de 30% a 10% en BBVA?"
-  must_include: [["no está documentado", "no se puede confirmar", "no está establecido", "no hay evidencia suficiente"], ["catálogos", "catalogos"], ["30%", "30 por ciento"], ["10%", "10 por ciento"]]
+  must_include: [["no está confirmada", "no se puede confirmar", "no está establecida", "no hay evidencia suficiente"], ["catálogos", "catalogos"], ["30%", "30 por ciento"], ["10%", "10 por ciento"]]
   must_not_include: ["los cinco catálogos causaron directamente", "como resultado directo de los cinco catálogos"]
 - id: ingles
-  question: "¿Qué nivel de inglés tiene?"
+  question: "¿Qué nivel de inglés tiene Hugo?"
   must_include: [["B2"]]
 - id: educacion
-  question: "¿Qué estudió?"
+  question: "¿Qué estudió Hugo?"
   must_include: [["Sistemas Computacionales"], ["Maestría", "maestría"]]
 - id: contacto
   question: "¿Cómo puedo contactarlo?"
