@@ -5,6 +5,8 @@ import logging
 import time
 from collections import OrderedDict
 
+from redis.asyncio import Redis
+
 from fastapi import FastAPI, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -32,6 +34,13 @@ STORE: "OrderedDict[str, list]" = OrderedDict()
 STORE_MAX = 500
 RATE: dict = {}
 RATE_LIMIT = int(__import__("os").getenv("RATE_LIMIT_PER_MIN", "30"))
+redis_client = Redis.from_url(config.REDIS_URL, decode_responses=True) if config.REDIS_URL else None
+
+
+class RateLimitStoreUnavailable(Exception):
+    """Raised when the configured shared rate-limit store cannot be reached."""
+
+
 
 
 def authorized(authorization: str | None) -> bool:
@@ -42,9 +51,27 @@ def authorized(authorization: str | None) -> bool:
     return hmac.compare_digest(authorization, f"Bearer {expected}")
 
 
-def rate_limited(ip: str) -> bool:
+async def rate_limited(ip: str) -> bool:
+    if redis_client is not None:
+        # Atomic fixed-window counter shared across all application instances.
+        key = f"cv-agent:rate:{ip}"
+        script = """
+        local count = redis.call('INCR', KEYS[1])
+        if count == 1 then
+            redis.call('EXPIRE', KEYS[1], ARGV[1])
+        end
+        return count
+        """
+        try:
+            count = await redis_client.eval(script, 1, key, config.RATE_WINDOW_SECONDS)
+        except Exception as exc:
+            log.exception("rate_limit_store_unavailable")
+            raise RateLimitStoreUnavailable from exc
+        return int(count) > RATE_LIMIT
+
+    # Local fallback for development and single-instance deployments only.
     now = time.time()
-    hits = [t for t in RATE.get(ip, []) if now - t < 60]
+    hits = [t for t in RATE.get(ip, []) if now - t < config.RATE_WINDOW_SECONDS]
     hits.append(now)
     RATE[ip] = hits
     return len(hits) > RATE_LIMIT
@@ -83,7 +110,13 @@ async def create_response(request: Request, authorization: str | None = Header(d
 
     # No confiar en X-Forwarded-For enviado por el cliente: puede falsificarse.
     ip = request.client.host if request.client else "unknown"
-    if rate_limited(ip):
+    try:
+        limited = await rate_limited(ip)
+    except RateLimitStoreUnavailable:
+        response = error(503, "server_error", "El control de tráfico no está disponible.", "rate_limit_store_unavailable")
+        response.headers["Retry-After"] = "5"
+        return response
+    if limited:
         return error(429, "too_many_requests", "Demasiadas solicitudes. Intenta en un minuto.", "rate_limit_exceeded")
 
     content_length = request.headers.get("content-length")
