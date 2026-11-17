@@ -1,4 +1,5 @@
 """Servicio HTTP del agente de CV, compatible con Open Responses."""
+import hmac
 import json
 import logging
 import time
@@ -18,15 +19,27 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("cv-agent")
 
 app = FastAPI(title="Agente de CV de Hugo Medina", version="1.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+allowed_origins = [origin.strip() for origin in __import__("os").getenv("CORS_ORIGINS", "").split(",") if origin.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 agent = CVAgent()
 MODEL_NAME = "hugo-cv-agent"
-# Memoria corta para previous_response_id (en memoria; se pierde si el servicio reinicia).
 STORE: "OrderedDict[str, list]" = OrderedDict()
 STORE_MAX = 500
-# Límite de uso por IP (ventana de 60 s). En serverless es por instancia: protección básica.
 RATE: dict = {}
 RATE_LIMIT = int(__import__("os").getenv("RATE_LIMIT_PER_MIN", "30"))
+
+
+def authorized(authorization: str | None) -> bool:
+    """Fail closed: no se permite tráfico si el secreto no está configurado."""
+    expected = config.AGENT_API_KEY
+    if not expected or not authorization:
+        return False
+    return hmac.compare_digest(authorization, f"Bearer {expected}")
 
 
 def rate_limited(ip: str) -> bool:
@@ -50,17 +63,13 @@ def remember(resp_id: str, history: list, answer: str):
 @app.get("/")
 @app.get("/health")
 def health():
-    # Ligero: no llama al modelo. Para probar el modelo usar /health/llm.
-    return {"status": "ok", "agent": MODEL_NAME, "chunks": len(agent.retriever.chunks),
-            "llm_provider": config.LLM_PROVIDER, "llm_model": config.LLM_MODEL,
-            "llm_fallback_model": config.LLM_FALLBACK_MODEL or None,
-            "llm_key_configured": bool(config.LLM_API_KEY)}
+    return {"status": "ok", "agent": MODEL_NAME, "chunks": len(agent.retriever.chunks)}
 
 
 @app.get("/health/llm")
 def health_llm(authorization: str | None = Header(default=None)):
-    """Diagnóstico real del modelo (consume cuota). Protegido con la misma API key."""
-    if config.AGENT_API_KEY and authorization != f"Bearer {config.AGENT_API_KEY}":
+    """Diagnóstico real del modelo (consume cuota); requiere API key."""
+    if not authorized(authorization):
         return error(401, "invalid_request", "API key inválida o ausente.", "invalid_api_key")
     result = agent.llm.ping()
     return JSONResponse(status_code=200 if result.get("ok") else 503, content=result)
@@ -69,36 +78,52 @@ def health_llm(authorization: str | None = Header(default=None)):
 @app.post("/v1/responses")
 @app.post("/responses")
 async def create_response(request: Request, authorization: str | None = Header(default=None)):
-    if config.AGENT_API_KEY and authorization != f"Bearer {config.AGENT_API_KEY}":
+    if not authorized(authorization):
         return error(401, "invalid_request", "API key inválida o ausente.", "invalid_api_key")
-    ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "?").split(",")[0]
+
+    # No confiar en X-Forwarded-For enviado por el cliente: puede falsificarse.
+    ip = request.client.host if request.client else "unknown"
     if rate_limited(ip):
         return error(429, "too_many_requests", "Demasiadas solicitudes. Intenta en un minuto.", "rate_limit_exceeded")
+
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > config.MAX_REQUEST_BYTES:
+                return error(413, "invalid_request", "El cuerpo de la solicitud excede el tamaño permitido.", "request_too_large")
+        except ValueError:
+            return error(400, "invalid_request", "Content-Length inválido.")
+
+    raw_body = await request.body()
+    if len(raw_body) > config.MAX_REQUEST_BYTES:
+        return error(413, "invalid_request", "El cuerpo de la solicitud excede el tamaño permitido.", "request_too_large")
     try:
-        body = await request.json()
-    except Exception:
+        body = json.loads(raw_body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
         return error(400, "invalid_request", "El cuerpo debe ser JSON válido.")
+    if not isinstance(body, dict):
+        return error(400, "invalid_request", "El cuerpo debe ser un objeto JSON.")
     if "input" not in body:
         return error(400, "invalid_request", "Falta el campo 'input'.", "missing_required_parameter", "input")
 
     prev = body.get("previous_response_id")
     history = []
     if prev:
-        if prev not in STORE:
-            return error(404, "not_found", f"Previous response with id '{prev}' not found.",
+        if not isinstance(prev, str) or prev not in STORE:
+            return error(404, "not_found", "Previous response not found.",
                          "previous_response_not_found", "previous_response_id")
         history = list(STORE[prev])
     history += parse_input(body["input"])
     if not history or history[-1]["role"] != "user":
         return error(400, "invalid_request", "No hay un mensaje de usuario que responder.", param="input")
 
-    instructions = body.get("instructions")
     model = body.get("model") or MODEL_NAME
     resp_id = new_id("resp")
     t0 = time.time()
 
     if body.get("stream"):
-        msgs, meta = agent.prepare(history, instructions)
+        # Las instrucciones del cliente no se elevan al prompt del sistema.
+        msgs, meta = agent.prepare(history)
         chunks = iter([INJECTION_REPLY]) if msgs is None else agent.llm.stream(msgs)
 
         def finalize(text):
@@ -112,10 +137,10 @@ async def create_response(request: Request, authorization: str | None = Header(d
 
         return StreamingResponse(stream_events(resp_id, model, prev, chunks, finalize),
                                  media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+                                 headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
     try:
-        text, usage, meta = agent.answer(history, instructions)
+        text, usage, meta = agent.answer(history)
     except LLMError as e:
         log.error(json.dumps({"event": "llm_error", "id": resp_id, **e.diagnostics()}))
         resp = error(e.http_status, "server_error", e.message, e.code)
@@ -133,5 +158,5 @@ async def create_response(request: Request, authorization: str | None = Header(d
                                  "latency_ms": str(meta.get("latency_ms", "")),
                                  "llm_model": str(meta.get("llm_model") or ""),
                                  "llm_attempts": str(meta.get("llm_attempts") or "")})
-    out["output_text"] = text  # atajo útil para clientes; no rompe la especificación
+    out["output_text"] = text
     return out
