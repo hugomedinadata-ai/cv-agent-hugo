@@ -15,8 +15,9 @@ import unicodedata
 from collections import Counter
 from dataclasses import dataclass
 
+# No eliminar negaciones: son relevantes para consultas sobre límites y responsabilidades.
 STOPWORDS = set("""a al algo como con cual cuales de del el ella en es esa ese esta este fue ha
-hay la las le lo los mas me mi muy no o para pero por que se sin sobre su sus te tu un una
+hay la las le lo los mas me mi muy o para pero por que se sobre su sus te tu un una
 uno y ya the of and to in is what who how his he does did tiene tuvo hizo hace cual cuál
 qué que quien quién cómo como donde dónde cuando cuándo hugo""".split())
 
