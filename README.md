@@ -60,8 +60,9 @@ Respuesta ◄── Verificación de salida ◄── LLM (API compatible con Op
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env   # agrega tu LLM_API_KEY
-export $(cat .env | xargs) && uvicorn app.main:app --reload
+cp .env.example .env   # reemplaza LLM_API_KEY y AGENT_API_KEY con valores locales
+set -a && source .env && set +a
+uvicorn app.main:app --reload
 curl -s localhost:8000/v1/responses -H "Content-Type: application/json" \
   -H "Authorization: Bearer $AGENT_API_KEY" \
   -d '{"model":"hugo-cv-agent","input":"¿Cuál es el logro principal de Hugo?"}'
