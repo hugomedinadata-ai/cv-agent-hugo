@@ -131,10 +131,11 @@ def test_endpoint_devuelve_503_tipado(llm, monkeypatch):
     from fastapi.testclient import TestClient
     import app.main as m
     monkeypatch.setattr(m.agent, "llm", llm())
-    monkeypatch.setattr(config, "AGENT_API_KEY", "")
+    monkeypatch.setattr(config, "AGENT_API_KEY", "test-agent-key")
     m.RATE.clear()
     MODE["by_model"] = {"main": "503"}
-    r = TestClient(m.app).post("/v1/responses", json={"input": "¿Qué logró Hugo?"})
+    client = TestClient(m.app, headers={"Authorization": "Bearer test-agent-key"})
+    r = client.post("/v1/responses", json={"input": "¿Qué logró Hugo?"})
     assert r.status_code == 503 and r.headers.get("retry-after") == "5"
     assert r.json()["error"]["code"] == "model_unavailable"
     assert "test" not in r.text  # la llave nunca aparece
